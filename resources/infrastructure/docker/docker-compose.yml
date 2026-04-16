@@ -1,0 +1,122 @@
+# Templates to factorize the service definitions
+x-templates:
+    worker_base: &worker_base
+        build:
+            context: services/php
+            target: worker
+        user: "${USER_ID}:${USER_ID}"
+        environment:
+            - APP_ENV
+        depends_on:
+            - db
+        volumes:
+            - "../..:/var/www:cached"
+        profiles:
+            - worker
+
+volumes:
+    db-data: {}
+    # # Needed if $XDG_ env vars have been overridden
+    # builder-yarn-data: {}
+
+services:
+    db:
+        image: mysql
+        volumes:
+            - db-data:/var/lib/mysql
+        environment:
+            MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+
+    frontend:
+        build:
+            context: services/php
+            target: frontend
+            cache_from:
+              - "type=registry,ref=${REGISTRY:-}/frontend:cache"
+        user: "${USER_ID}:${USER_ID}"
+        environment:
+            - APP_ENV
+        volumes:
+            - "../..:/var/www:cached"
+            - "../../.home:/home/app:cached"
+        depends_on:
+            - db
+        profiles:
+            - default
+        labels:
+            - "traefik.enable=true"
+            - "project-name=${PROJECT_NAME}"
+            - "traefik.http.routers.${PROJECT_NAME}-frontend.rule=Host(${PROJECT_DOMAINS})"
+            - "traefik.http.routers.${PROJECT_NAME}-frontend.tls=true"
+            - "traefik.http.routers.${PROJECT_NAME}-frontend-unsecure.rule=Host(${PROJECT_DOMAINS})"
+            # Comment the next line to be able to access frontend via HTTP instead of HTTPS
+            - "traefik.http.routers.${PROJECT_NAME}-frontend-unsecure.middlewares=redirect-to-https@file"
+
+    varnish:
+        image: varnish:8-alpine
+        depends_on:
+            - frontend
+        labels:
+            - "traefik.enable=true"
+            - "project-name=${PROJECT_NAME}"
+            - "traefik.http.routers.${PROJECT_NAME}-varnish.rule=Host(`www-cached.${PROJECT_ROOT_DOMAIN}`)"
+            - "traefik.http.routers.${PROJECT_NAME}-varnish-ssl.tls=true"
+            - "traefik.http.routers.${PROJECT_NAME}-varnish-ssl.rule=Host(`www-cached.${PROJECT_ROOT_DOMAIN}`)"
+        volumes:
+            - './services/varnish/default.vcl:/etc/varnish/default.vcl:ro'
+
+    # phpmyadmin container
+    phpmyadmin:
+        image: phpmyadmin
+        depends_on:
+            - db
+        ports:
+            - 8090:80
+        environment:
+            PMA_HOST: db
+
+    mail:
+        image: axllent/mailpit
+        environment:
+            - MP_SMTP_BIND_ADDR=0.0.0.0:25
+        labels:
+            - "traefik.enable=true"
+            - "project-name=${PROJECT_NAME}"
+            - "traefik.http.routers.${PROJECT_NAME}-mail.rule=Host(`${MAIL_DOMAIN}`)"
+            - "traefik.http.routers.${PROJECT_NAME}-mail.tls=true"
+            - "traefik.http.services.mail.loadbalancer.server.port=8025"
+        profiles:
+            - default
+
+    worker_messenger:
+        <<: *worker_base
+        command: php -d memory_limit=1G /var/www/application/bin/console messenger:consume async --memory-limit=256M
+
+    builder:
+        build:
+            context: services/php
+            target: builder
+            cache_from:
+                - "type=registry,ref=${REGISTRY:-}/builder:cache"
+        init: true
+        user: "${USER_ID}:${USER_ID}"
+        environment:
+            - APP_ENV
+            - COMPOSER_NO_INTERACTION=1
+            # The following list contains the common environment variables exposed by CI platforms
+            - GITHUB_ACTIONS
+            - CI # Travis CI, CircleCI, Cirrus CI, Gitlab CI, Appveyor, CodeShip, dsari
+            - CONTINUOUS_INTEGRATION # Travis CI, Cirrus CI
+            - BUILD_NUMBER # Jenkins, TeamCity
+            - RUN_ID # TaskCluster, dsari
+        volumes:
+            - "../..:/var/www:cached"
+            - "../../.home:/home/app:cached"
+            # Needed when $XDG_ env vars have overridden, to persist the yarn
+            # cache between builder and watcher, adapt according to the location
+            # of $XDG_DATA_HOME
+            # - "builder-yarn-data:/data/yarn"
+        depends_on:
+            - db
+        profiles:
+            - builder

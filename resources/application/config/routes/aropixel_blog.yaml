@@ -1,0 +1,3 @@
+aropixel_blog:
+  resource: '@AropixelBlogBundle/Resources/config/routes.yaml'
+  prefix: /__ADMIN_SLUG__

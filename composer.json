@@ -1,0 +1,12 @@
+{
+    "name": "joelgomez/castor-starter",
+    "authors": [
+        {
+            "name": "Joël Gomez Caballe",
+            "email": "joel.gomez@aropixel.com"
+        }
+    ],
+    "require": {
+        "jolicode/castor": "^1.3"
+    }
+}
