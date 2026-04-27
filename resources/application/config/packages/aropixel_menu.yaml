@@ -1,0 +1,8 @@
+aropixel_menu:
+    menus:
+        main:
+            name: 'Main menu'
+            depth: 3
+        footer:
+            name: 'Footer'
+            depth: 2
